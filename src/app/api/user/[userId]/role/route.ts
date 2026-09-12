@@ -12,17 +12,17 @@ export async function PATCH(
   context: { params: Promise<{ userId: string }> }
 ) {
   try {
-    // Get target user ID from URL
+    // Get target user ID
     const { userId } = await context.params;
 
-    // Get currently logged-in user
+    // Get logged-in user
     const currentUser = await getCurrentUser();
 
     // Check authentication
     if (!currentUser) {
       return NextResponse.json(
         {
-          error: "You are not authorized to change user roles",
+          error: "You are not authenticated",
         },
         {
           status: 401,
@@ -30,8 +30,23 @@ export async function PATCH(
       );
     }
 
-    // User cannot change their own role
-    if (currentUser.id === userId) {
+    // Only ADMIN and MANAGER can change roles
+    if (
+      currentUser.role !== Role.ADMIN &&
+      currentUser.role !== Role.MANAGER
+    ) {
+      return NextResponse.json(
+        {
+          error: "You are not authorized to change user roles",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    // Prevent user from changing their own role
+    if (userId === currentUser.id) {
       return NextResponse.json(
         {
           error: "You cannot change your own role",
@@ -42,15 +57,14 @@ export async function PATCH(
       );
     }
 
-    // Find the user whose role we want to change
-    const targetUser = await prisma.user.findUnique({
+    // Check if target user exists
+    const existingUser = await prisma.user.findUnique({
       where: {
         id: userId,
       },
     });
 
-    // Check if target user exists
-    if (!targetUser) {
+    if (!existingUser) {
       return NextResponse.json(
         {
           error: "User not found",
@@ -61,10 +75,10 @@ export async function PATCH(
       );
     }
 
-    // Get new role from request body
+    // Get requested role
     const { role } = await request.json();
 
-    // Validate role
+    // Validate requested role
     if (!Object.values(Role).includes(role)) {
       return NextResponse.json(
         {
@@ -76,7 +90,6 @@ export async function PATCH(
       );
     }
 
-    // Tell TypeScript that role is a valid Role
     const newRole = role as Role;
 
     // Role hierarchy
@@ -105,9 +118,9 @@ export async function PATCH(
     }
 
     // Current user cannot change someone
-    // who has an equal or higher role
+    // with an equal or higher role
     if (
-      roleHierarchy[targetUser.role] >=
+      roleHierarchy[existingUser.role] >=
       roleHierarchy[currentUser.role]
     ) {
       return NextResponse.json(
@@ -121,7 +134,7 @@ export async function PATCH(
       );
     }
 
-    // Update the user's role
+    // Update user role
     const updatedUser = await prisma.user.update({
       where: {
         id: userId,
@@ -141,14 +154,14 @@ export async function PATCH(
     return NextResponse.json(
       {
         user: userWithoutPassword,
-        message: "User role updated successfully",
+        message: `User role updated to ${newRole} successfully`,
       },
       {
         status: 200,
       }
     );
   } catch (error) {
-    console.error("Update role error:", error);
+    console.error("Role assignment error:", error);
 
     return NextResponse.json(
       {
