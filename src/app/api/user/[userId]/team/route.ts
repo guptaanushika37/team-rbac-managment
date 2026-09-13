@@ -1,27 +1,28 @@
-import {
-  checkUserPermission,
-  getCurrentUser,
-} from "@/app/lib/auth";
-
+import { getCurrentUser } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/db";
-
 import { Role } from "@/app/types";
-import { NextRequest, NextResponse } from "next/server";
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: Promise<{ userId: string }> }
+  context: {
+    params: Promise<{ userId: string }>;
+  }
 ) {
   try {
+    // Get user ID from URL
     const { userId } = await context.params;
 
-    const user = await getCurrentUser();
+    // Check logged-in user
+    const currentUser = await getCurrentUser();
 
-    // Check admin permission
-    if (!user || !checkUserPermission(user, Role.ADMIN)) {
+    if (!currentUser) {
       return NextResponse.json(
         {
-          error: "You are not authorized to assign team",
+          error: "You are not authenticated",
         },
         {
           status: 401,
@@ -29,12 +30,26 @@ export async function PATCH(
       );
     }
 
-    // Check if user exists
-    const existingUser = await prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-    });
+    // Only ADMIN can assign teams
+    if (currentUser.role !== Role.ADMIN) {
+      return NextResponse.json(
+        {
+          error:
+            "You are not authorized to assign teams",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    // Check target user
+    const existingUser =
+      await prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
+      });
 
     if (!existingUser) {
       return NextResponse.json(
@@ -47,58 +62,136 @@ export async function PATCH(
       );
     }
 
-    const { teamId } = await request.json();
+    // Read request body
+    const body = await request.json();
 
-    // Check if team exists
-    if (teamId) {
-      const team = await prisma.team.findUnique({
-        where: {
-          id: teamId,
-        },
-      });
+    const teamId = body.teamId;
 
-      if (!team) {
-        return NextResponse.json(
-          {
-            error: "Team not found",
+    console.log("Team assignment request:", {
+      userId,
+      teamId,
+    });
+
+    // =========================
+    // REMOVE FROM TEAM
+    // =========================
+
+    if (
+      teamId === null ||
+      teamId === "" ||
+      teamId === undefined
+    ) {
+      const updatedUser =
+        await prisma.user.update({
+          where: {
+            id: userId,
           },
-          {
-            status: 404,
-          }
-        );
-      }
+          data: {
+            teamId: null,
+          },
+          include: {
+            team: true,
+          },
+        });
+
+      const {
+        password: _password,
+        ...userWithoutPassword
+      } = updatedUser;
+
+      return NextResponse.json(
+        {
+          user: userWithoutPassword,
+          message:
+            "User removed from team successfully",
+        },
+        {
+          status: 200,
+        }
+      );
     }
 
-    // Update user's team assignment
-    const updatedUser = await prisma.user.update({
+    // =========================
+    // VALIDATE TEAM ID
+    // =========================
+
+    if (typeof teamId !== "string") {
+      return NextResponse.json(
+        {
+          error: "Invalid team ID",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // Check if team exists
+    const team = await prisma.team.findUnique({
       where: {
-        id: userId,
-      },
-      data: {
-        teamId: teamId || null,
-      },
-      include: {
-        team: true,
+        id: teamId,
       },
     });
 
+    if (!team) {
+      console.log(
+        "Team not found:",
+        teamId
+      );
+
+      return NextResponse.json(
+        {
+          error: "Team not found",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // =========================
+    // UPDATE USER TEAM
+    // =========================
+
+    const updatedUser =
+      await prisma.user.update({
+        where: {
+          id: userId,
+        },
+        data: {
+          teamId: team.id,
+        },
+        include: {
+          team: true,
+        },
+      });
+
+    // Don't return password
+    const {
+      password: _password,
+      ...userWithoutPassword
+    } = updatedUser;
+
     return NextResponse.json(
       {
-        user: updatedUser,
-        message: teamId
-          ? "User assigned to team successfully"
-          : "User removed from team successfully",
+        user: userWithoutPassword,
+        message:
+          "User assigned to team successfully",
       },
       {
         status: 200,
       }
     );
   } catch (error) {
-    console.error("Assign team error:", error);
+    console.error(
+      "Team assignment error:",
+      error
+    );
 
     return NextResponse.json(
       {
-        error: "Internal server error, Something went wrong!",
+        error:
+          "Internal server error, something went wrong!",
       },
       {
         status: 500,
