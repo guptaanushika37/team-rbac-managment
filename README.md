@@ -1,4 +1,7 @@
 
+working prototype screenshots
+https://docs.google.com/document/d/1wmmRAV3tV7-kVmIPZoq9Zw59PD7bKW07Ws5qXIiGaUk/edit?usp=sharing
+
 # Team RBAC Management
 
 A role-based team management dashboard built with Next.js, TypeScript, Prisma, and PostgreSQL.
